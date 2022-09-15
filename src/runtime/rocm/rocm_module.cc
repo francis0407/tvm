@@ -24,6 +24,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/func_arg_recorder.h>
 
 #include <array>
 #include <mutex>
@@ -48,8 +49,8 @@ class ROCMModuleNode : public runtime::ModuleNode {
  public:
   explicit ROCMModuleNode(std::string data, std::string fmt,
                           std::unordered_map<std::string, FunctionInfo> fmap,
-                          std::string hip_source, std::string assembly)
-      : data_(data), fmt_(fmt), fmap_(fmap), hip_source_(hip_source), assembly_(assembly) {
+                          std::string hip_source, std::string llvm_source, std::string assembly)
+      : data_(data), fmt_(fmt), fmap_(fmap), hip_source_(hip_source), llvm_source_(llvm_source), assembly_(assembly) {
     std::fill(module_.begin(), module_.end(), nullptr);
   }
   // destructor
@@ -86,10 +87,13 @@ class ROCMModuleNode : public runtime::ModuleNode {
       return data_;
     }
     if (format == "llvm" || format == "") {
-      return hip_source_;
+      return llvm_source_;
     }
     if (format == "asm") {
       return assembly_;
+    }
+    if (format == "hip") {
+      return hip_source_;
     }
     return "";
   }
@@ -134,6 +138,8 @@ class ROCMModuleNode : public runtime::ModuleNode {
   std::unordered_map<std::string, FunctionInfo> fmap_;
   // The hip source.
   std::string hip_source_;
+  // The llvm source.
+  std::string llvm_source_;
   // The gcn asm.
   std::string assembly_;
   // the internal modules per GPU, to be lazily initialized.
@@ -168,6 +174,11 @@ class ROCMWrappedFunc {
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, packed_args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                       &packed_nbytes, HIP_LAUNCH_PARAM_END};
     // HIP supports only extra_args.
+    std::vector<void*> arg_pointers;
+    for (size_t i = 0; i < (packed_nbytes / 8); i++) {
+      arg_pointers.push_back(((void**)packed_args)[i]);
+    }
+    global_recorder.NewDeviceRecord(func_name_.c_str(), arg_pointers, wl.work_size);
     ROCM_DRIVER_CALL(hipModuleLaunchKernel(
         fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1), wl.grid_dim(2), wl.block_dim(0),
         wl.block_dim(1), wl.block_dim(2), 0, strm, nullptr, reinterpret_cast<void**>(&config)));
@@ -200,9 +211,10 @@ PackedFunc ROCMModuleNode::GetFunction(const std::string& name,
 }
 
 Module ROCMModuleCreate(std::string data, std::string fmt,
-                        std::unordered_map<std::string, FunctionInfo> fmap, std::string hip_source,
+                        std::unordered_map<std::string, FunctionInfo> fmap, 
+                        std::string hip_source, std::string llvm_source,
                         std::string assembly) {
-  auto n = make_object<ROCMModuleNode>(data, fmt, fmap, hip_source, assembly);
+  auto n = make_object<ROCMModuleNode>(data, fmt, fmap, hip_source, llvm_source, assembly);
   return Module(n);
 }
 
@@ -213,7 +225,7 @@ Module ROCMModuleLoadFile(const std::string& file_name, const std::string& forma
   std::string meta_file = GetMetaFilePath(file_name);
   LoadBinaryFromFile(file_name, &data);
   LoadMetaDataFromFile(meta_file, &fmap);
-  return ROCMModuleCreate(data, fmt, fmap, std::string(), std::string());
+  return ROCMModuleCreate(data, fmt, fmap, std::string(),std::string(), std::string());
 }
 
 Module ROCMModuleLoadBinary(void* strm) {
@@ -224,7 +236,7 @@ Module ROCMModuleLoadBinary(void* strm) {
   stream->Read(&fmt);
   stream->Read(&fmap);
   stream->Read(&data);
-  return ROCMModuleCreate(data, fmt, fmap, std::string(), std::string());
+  return ROCMModuleCreate(data, fmt, fmap, std::string(),std::string(), std::string());
 }
 
 TVM_REGISTER_GLOBAL("runtime.module.loadbinary_hsaco").set_body_typed(ROCMModuleLoadBinary);

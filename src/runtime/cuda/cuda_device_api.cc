@@ -26,6 +26,7 @@
 #include <dmlc/thread_local.h>
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/func_arg_recorder.h>
 
 #include <cstring>
 
@@ -200,7 +201,9 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void* AllocWorkspace(TVMContext ctx, size_t size, DLDataType type_hint) final {
-    return CUDAThreadEntry::ThreadLocal()->pool.AllocWorkspace(ctx, size);
+    void* ret =  CUDAThreadEntry::ThreadLocal()->pool.AllocWorkspace(ctx, size);
+    global_recorder.AllocArg(ret, size);
+    return ret;
   }
 
   void FreeWorkspace(TVMContext ctx, void* data) final {

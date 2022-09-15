@@ -28,6 +28,7 @@
 #include <tvm/runtime/packed_func.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/runtime/serializer.h>
+#include <tvm/runtime/func_arg_recorder.h>
 
 #include <algorithm>
 #include <functional>
@@ -56,6 +57,7 @@ void GraphRuntime::Run() {
   for (size_t i = 0; i < op_execs_.size(); ++i) {
     if (op_execs_[i]) op_execs_[i]();
   }
+//  global_recorder.Print();
 }
 /*!
  * \brief Initialize the graph executor with graph and context.
@@ -445,10 +447,15 @@ std::pair<std::function<void()>, std::shared_ptr<GraphRuntime::OpArgs> > GraphRu
   tvm::runtime::PackedFunc pf = module_.GetFunction(param.func_name, true);
   ICHECK(pf != nullptr) << "no such function in module: " << param.func_name;
 
-  auto fexec = [arg_ptr, pf]() {
+  auto fexec = [arg_ptr, pf, param]() {
     TVMRetValue rv;
     TVMArgs targs(arg_ptr->arg_values.data(), arg_ptr->arg_tcodes.data(),
                   static_cast<int>(arg_ptr->arg_values.size()));
+    std::vector<void*> arg_pointers;
+    for (size_t i = 0; i < arg_ptr->args.size(); i++) {
+      arg_pointers.push_back(((DLTensor*)arg_ptr->arg_values[i].v_handle)->data);
+    }
+    global_recorder.NewHostRecord(param.func_name, arg_pointers);
     pf.CallPacked(targs, &rv);
   };
   return {fexec, arg_ptr};
@@ -514,6 +521,10 @@ PackedFunc GraphRuntime::GetFunction(const std::string& name,
       const auto& param_blob = args[1].operator std::string();
       dmlc::MemoryStringStream strm(const_cast<std::string*>(&param_blob));
       this->ShareParams(dynamic_cast<const GraphRuntime&>(*module.operator->()), &strm);
+    });
+  } else if (name == "get_schedule_json") {
+    return PackedFunc([](TVMArgs args, TVMRetValue* rv) {
+      *rv = global_recorder.ToJson();
     });
   } else {
     return PackedFunc();

@@ -27,6 +27,7 @@
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/support/logging.h>
+#include <tvm/runtime/func_arg_recorder.h>
 
 #include "rocm_common.h"
 
@@ -167,7 +168,9 @@ class ROCMDeviceAPI final : public DeviceAPI {
   }
 
   void* AllocWorkspace(TVMContext ctx, size_t size, DLDataType type_hint) final {
-    return ROCMThreadEntry::ThreadLocal()->pool.AllocWorkspace(ctx, size);
+    auto ret = ROCMThreadEntry::ThreadLocal()->pool.AllocWorkspace(ctx, size);
+    global_recorder.AllocArg(ret, size);
+    return ret;
   }
 
   void FreeWorkspace(TVMContext ctx, void* data) final {

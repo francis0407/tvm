@@ -27,7 +27,9 @@ namespace tvm {
 namespace runtime {
 
 Module ROCMModuleCreate(std::string data, std::string fmt,
-                        std::unordered_map<std::string, FunctionInfo> fmap, std::string rocm_source,
+                        std::unordered_map<std::string, FunctionInfo> fmap, 
+                        std::string hip_source,
+                        std::string rocm_source,
                         std::string assembly) {
   LOG(WARNING) << "ROCM runtime is not enabled, return a source module...";
   auto fget_source = [rocm_source, assembly](const std::string& format) {

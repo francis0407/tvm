@@ -25,6 +25,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/func_arg_recorder.h>
 
 #include <array>
 #include <mutex>
@@ -159,6 +160,7 @@ class CUDAWrappedFunc {
     func_name_ = func_name;
     std::fill(fcache_.begin(), fcache_.end(), nullptr);
     thread_axis_cfg_.Init(num_void_args, thread_axis_tags);
+    _num_void_args = num_void_args;
   }
   // invoke the function with void arguments
   void operator()(TVMArgs args, TVMRetValue* rv, void** void_args) const {
@@ -169,6 +171,11 @@ class CUDAWrappedFunc {
     }
     CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
     ThreadWorkLoad wl = thread_axis_cfg_.Extract(args);
+    std::vector<void*> arg_pointers;
+    for (int i = 0; i < _num_void_args; i++) {
+      arg_pointers.push_back(args.values[i].v_handle);
+    }
+    global_recorder.NewDeviceRecord(func_name_.c_str(), arg_pointers, wl.work_size);
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
                                      wl.block_dim(2), 0, strm, void_args, nullptr);
@@ -203,6 +210,7 @@ class CUDAWrappedFunc {
   mutable std::array<CUfunction, kMaxNumGPUs> fcache_;
   // thread axis configuration
   ThreadAxisConfig thread_axis_cfg_;
+  int _num_void_args;
 };
 
 class CUDAPrepGlobalBarrier {

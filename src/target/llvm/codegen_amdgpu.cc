@@ -30,6 +30,7 @@
 #include "../../runtime/rocm/rocm_module.h"
 #include "../build_common.h"
 #include "codegen_llvm.h"
+#include "../source/codegen_cuda.h"
 
 namespace tvm {
 namespace codegen {
@@ -304,7 +305,35 @@ runtime::Module BuildAMDGPU(IRModule mod, Target target) {
 
   std::string hsaco = (*f)(arr);
   std::string ll(data_ll.begin(), data_ll.end());
-  return ROCMModuleCreate(hsaco, "hsaco", ExtractFuncInfo(mod), ll, assembly);
+
+  // Use CodeGenCUDA to generate the source code
+  bool output_ssa = false;
+  CodeGenCUDA cuda_gen;
+  cuda_gen.Init(output_ssa);
+  for (auto kv : mod->functions) {
+    ICHECK(kv.second->IsInstance<PrimFuncNode>()) << "Can only lower IR Module with PrimFuncs";
+    auto f = Downcast<PrimFunc>(kv.second);
+    cuda_gen.AddFunction(f);
+  }
+  std::string hip_code = cuda_gen.Finish();
+
+  // TODO: replace these codes with a new code gen class
+  std::map<std::string, std::string> replace_map = {
+    {"llvm.amdgcn.mbcnt.hi", "__mbcnt_hi"},
+    {"llvm.amdgcn.mbcnt.lo", "__mbcnt_lo"},
+    {"llvm.amdgcn.ds.bpermute", "__hip_ds_bpermute"},
+  };
+  for (auto &pair : replace_map) {
+    size_t find_pos = hip_code.find(pair.first);
+    while(find_pos != std::string::npos) {
+      hip_code = hip_code.replace(find_pos, pair.first.size(), pair.second);
+      find_pos = hip_code.find(pair.first, find_pos);
+    }
+  }
+
+  std::string header = "#include <hip/hip_runtime.h>\n";
+  std::string final_code = header + hip_code;
+  return ROCMModuleCreate(hsaco, "hsaco", ExtractFuncInfo(mod), final_code, ll, assembly);
 }
 
 TVM_REGISTER_GLOBAL("target.build.rocm").set_body_typed(BuildAMDGPU);

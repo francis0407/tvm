@@ -48,7 +48,8 @@ static constexpr const int kMaxNumGPUs = 32;
  * \param rocm_source Optional, rocm source file
  */
 Module ROCMModuleCreate(std::string data, std::string fmt,
-                        std::unordered_map<std::string, FunctionInfo> fmap, std::string rocm_source,
+                        std::unordered_map<std::string, FunctionInfo> fmap, 
+                        std::string hip_source, std::string rocm_source,
                         std::string assembly);
 }  // namespace runtime
 }  // namespace tvm
